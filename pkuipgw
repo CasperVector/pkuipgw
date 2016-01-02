@@ -1,0 +1,319 @@
+#!/usr/bin/python3
+#
+# pkuipgw: PKU IPGW Client for Linux (v0.5.4)
+# <https://www.linux-wiki.cn/>
+# Copyright (c) 2007-2009,2011-2012 Chen Xing <cxcxcxcx@gmail.com>
+# Copyright (c) 2014-2015 Casper Ti. Vector <caspervector@gmail.com>
+# Copyright (c) 2015 Jianguo Chen <cjgls@pku.edu.cn>
+
+from __future__ import unicode_literals
+
+import getopt
+import re
+import sys
+import traceback
+from getpass import getpass
+from os.path import expanduser
+
+if sys.version_info[0] < 3:
+    from ConfigParser import ConfigParser
+    from cookielib import CookieJar
+    from urllib import urlencode
+    from urllib2 import build_opener, HTTPCookieProcessor
+else:
+    from configparser import ConfigParser
+    from http.cookiejar import CookieJar
+    from urllib.parse import urlencode
+    from urllib.request import build_opener, HTTPCookieProcessor
+
+class IpgwException(Exception):
+    pass
+
+def uni(s):
+    if type(s) is type(u''):
+        return s
+    else:
+        return s.decode('UTF-8')
+
+def pad(width, s):
+    delta = width - (len(s) + len([c for c in s if ord(c) > 128]))
+    return s + ' ' * (delta if delta > 0 else 0)
+
+def table(ws, ss):
+    return ''.join([pad(w, s) for w, s in zip(ws + [0], ss)]) + '\n'
+
+def read_page(p):
+    p = p.read()
+    try:
+        return p.decode('UTF-8')
+    except UnicodeDecodeError:
+        return p.decode('GB18030')
+
+def my_input(prompt, pw = False):
+    try:
+        if pw:
+            s = getpass(prompt)
+        else:
+            sys.stderr.write(prompt)
+            sys.stderr.flush()
+            s = sys.stdin.readline()
+            if not s:
+                raise EOFError
+    except EOFError:
+        sys.stderr.write('\n')
+        raise IpgwException('ValueError')
+    return uni(s.rstrip('\r\n'))
+
+def get_login_cred(configFiles):
+    if configFiles:
+        config = ConfigParser()
+        if not config.read(configFiles):
+            raise IpgwException('ConfError', 'no readable config file')
+        elif 'pkuipgw' not in config.sections():
+            raise IpgwException(
+                'ConfError', "section `pkuipgw' not found in config file"
+            )
+        config = dict([(uni(k), uni(v)) for (k, v) in config.items('pkuipgw')])
+        if 'username' not in config or 'password' not in config:
+            raise IpgwException(
+                'ConfError', "both `username' and `password' required"
+            )
+        username, password = config['username'], config['password']
+    else:
+        username = my_input('Username: ')
+        password = my_input('Password: ', pw = True)
+    return username, password
+
+def login(opener, username, password):
+    magicStr = '|;kiDrqvfi7d$v0p5Fg72Vwbv2;|'
+    opener.open('https://its.pku.edu.cn/').read()
+    page = opener.open(
+        'https://its.pku.edu.cn/cas/login', urlencode({
+            'fwrd': 'free',
+            'username1': username,
+            'password': password,
+            'username': username + magicStr + password + magicStr + '12',
+        }).encode('UTF-8')
+    )
+    html = read_page(page)
+    if re.match(r'https://its\.pku\.edu\.cn/netportal/', page.geturl()):
+        return bool(re.search(r"doaction\('PKUIPGW\?", html)) + 1
+    else:
+        if html.find('Username or Password error!') != -1:
+            raise IpgwException('IpgwError', 'username or password error')
+        else:
+            raise IpgwException('IpgwError', 'failed to open netportal page')
+
+def do_connect(opener, typ, variant = 1):
+    if variant == 1:
+        url = 'https://its.pku.edu.cn/netportal/%s%s' % (
+            'ipgwopen' if typ.startswith('connect') else 'ipgwclose',
+            'all' if typ.endswith('all') else ''
+        )
+    else:
+        opener.open(
+            'https://its.pku.edu.cn/netportal/PKUIPGW?cmd=%s&type=%s&fr=0' % {
+                'connect': ('open', 'free'),
+                'connectall': ('open', 'fee'),
+                'disconnect': ('close', 'self'),
+                'disconnectall': ('close', 'allconn')
+            }[typ]
+        )
+        url = 'https://its.pku.edu.cn/netportal/itsResult.jsp'
+    return read_page(opener.open(url))
+
+def do_kick(opener, cred, ip):
+    cred['operation'] = 'disconnectip_err'
+    cred['disconnectip'] = ip
+    return read_page(opener.open(
+        'https://its.pku.edu.cn/netportal/ipgw.ipgw',
+        urlencode(cred).encode('UTF-8')
+    ))
+
+def get_conn(opener, cred):
+    cred['operation'] = 'get_disconnectip_err'
+    html = read_page(opener.open(
+        'https://its.pku.edu.cn/netportal/ipgw.ipgw',
+        urlencode(cred).encode('UTF-8')
+    ))
+    match = re.search(
+        r'<table[^<>]+align=center>.*?</table>', html, flags = re.DOTALL
+    )
+    if not match:
+        raise IpgwException(
+            'IpgwError', 'failed to retrieve list of connections'
+        )
+
+    html = match.group(0)
+    conn = [
+        re.findall(r'<td[^<>]*>(.*?)</td>', row) for row in
+        re.findall(r'<tr align=center>(.*?)</tr>', html, flags = re.DOTALL)
+    ]
+    if len(conn) < 2:
+        raise IpgwException(
+            'IpgwError', 'malformed list of connections', html + '\n'
+        )
+
+    conn[0] = [re.match(r'<b>(.*)</b>$', col) for col in conn[0]]
+    if not (all(conn[0]) and list(set(map(len, conn))) == [4]):
+        raise IpgwException(
+            'IpgwError', 'malformed list of connections', html + '\n'
+        )
+
+    conn = [row[: 3] for row in conn]
+    conn[0] = [col.group(1) for col in conn[0]]
+    return conn
+
+def get_acct_info(html, variant = 1):
+    result = [('VARIANT', str(variant))]
+
+    if variant == 1:
+        match = re.search(r'<!--IPGWCLIENT_START(.*?)IPGWCLIENT_END-->', html)
+        if not match:
+            raise IpgwException('IpgwError', 'failed to retrieve account info')
+        result += re.findall(r'([^ =]+)=([^ ]*)', match.group(1))
+        status = dict(result).get('SUCCESS') == 'YES'
+
+    else:
+        dic = {}
+        for div in re.findall(
+            r'<div id="title.*?</div>', html, flags = re.DOTALL
+        ):
+            for k, pat in [
+                ('INTERNET', r'\b(Internet|Network)\b'),
+                ('WLAN', r'\b(WLAN|Wireless)\b')
+            ]:
+                if re.search(pat, div):
+                    dic[k] = re.search(
+                        r'\b(Connected|Disconnected|closed)\b', div
+                    )
+        if not ('WLAN' in dic and 'INTERNET' in dic):
+            raise IpgwException('IpgwError', 'failed to retrieve account info')
+        match = re.search(
+            r'<center><table.*?</table></center>', html, flags = re.DOTALL
+        )
+
+        result += [
+            (k, v.group(1).capitalize() if v else 'Failed')
+            for k, v in sorted(dic.items())
+        ] + [
+            (k.replace('&nbsp;', '').rstrip('\uFF1A'), v)
+            for k, v in re.findall(
+                r'<tr>\s*<td[^<>]*>([^<>]+)</td>\s*'
+                r'<td[^<>]*>\s*<strong>([^<>]*)</strong>\s*</td>\s*</tr>',
+                re.sub(
+                    r'<!--.*?-->', '', match.group(0) if match else '',
+                    flags = re.DOTALL
+                )
+            )
+        ]
+        status = all(dic.values())
+
+    return (status,
+        ''.join([table([16], [item[0] + ':', item[1]]) for item in result])
+    )
+
+def get_kick_cred(html):
+    match = re.search(
+        r'<form name="disconnect".*?</form>', html, flags = re.DOTALL
+    )
+    if not match:
+        raise IpgwException('IpgwError', 'failed to retrieve kick credentials')
+    return dict(re.findall(
+        r'<input type="hidden" name="([^"]+)" value="([^"]*)">',
+        match.group(0)
+    ))
+
+def ask_kick_ip(conn):
+    l = len(conn)
+    sys.stderr.write('List of connections:\n')
+    for i in range(l):
+        sys.stderr.write(table(
+            [8, 24, 16], ['(%d)' % i if i else ''] + conn[i]
+        ))
+    i = my_input('Choose a connection to kick (1 - %d): ' % (l - 1))
+    try:
+        i = int(i)
+        if not (0 < i < l):
+            raise ValueError
+    except ValueError:
+        raise IpgwException('ValueError')
+    return conn[i][0]
+
+def in_main(argv):
+    try:
+        opts, args = getopt.getopt(argv[1:], 'c:i')
+    except getopt.GetoptError:
+        raise IpgwException('ArgError')
+
+    configFiles, ask = [], False
+    for key, val in opts:
+        if key == '-c':
+            configFiles.append(val)
+        elif key == '-i':
+            ask = True
+
+    if ask:
+        if configFiles:
+            raise IpgwException('ArgError')
+    elif not configFiles:
+        configFiles = ['/etc/pkuipgwrc', expanduser('~/.pkuipgwrc')]
+
+    if len(args) < 1 or args[0] not in ['connect', 'disconnect', 'kick']:
+        raise IpgwException('ArgError')
+    elif len(args) == 1:
+        doAll = False
+    elif len(args) == 2 and args[1] == 'all':
+        if args[0] == 'kick':
+            raise IpgwException('ArgError')
+        doAll = True
+    else:
+        raise IpgwException('ArgError')
+
+    username, password = get_login_cred(configFiles)
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    variant = login(opener, username, password)
+    if args[0] == 'kick':
+        cred = get_kick_cred(do_connect(opener, 'connect'))
+        info = get_acct_info(do_kick(
+            opener, cred, ask_kick_ip(get_conn(opener, cred))
+        ))
+    else:
+        info = get_acct_info(do_connect(
+            opener, args[0] + ('all' if doAll else ''), variant
+        ), variant)
+    if not info[0]:
+        raise IpgwException(
+            'IpgwError', 'account info indicating failure', info[1]
+        )
+    sys.stdout.write(info[1])
+
+def main():
+    try:
+        in_main(sys.argv)
+    except IpgwException as ex:
+        info = {
+            'ArgError': [1,
+                'Usage: pkuipgw [-c cfg_file [-c ...] | -i]'
+                ' ((connect | disconnect) [all] | kick)\n'
+                "Use `-i' to read username and password from keyboard.\n"
+                "Use `connect all' to connect to non-free IPs as well.\n"
+            ], 'ValueError': [1, 'ValueError: invalid input\n'],
+            'ConfError': [1], 'IpgwError': [2]
+        }[ex.args[0]]
+        if len(info) == 1:
+            info.append({
+                2: '%s: %s\n',
+                3: '%s: %s (see below)\n\n%s'
+            }[len(ex.args)] % ex.args)
+        sys.stderr.write(info[1])
+        sys.exit(info[0])
+    except:
+        traceback.print_exc()
+        sys.exit(3)
+    else:
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()
+

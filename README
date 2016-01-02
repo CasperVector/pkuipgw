@@ -1,0 +1,37 @@
+pkuipgw: PKU IPGW Client for Linux (v0.5.4)
+===========================================
+
+
+Invocation
+----------
+
+To run pkuipgw, use
+
+	$ pkuipgw [-c cfg_file [-c ...] | -i] \
+		((connect | disconnect) [all] | kick)
+	# Use `-i' to read username and password from keyboard input.
+	# Use `connect all' to connect to non-free IPs as well.
+
+If no config file is specified with `-c', pkuipgw will try to read the
+following files in order, and newer configurations will be overlaid on old
+ones:
+
+	/etc/pkuipgwrc
+	$HOME/.pkuipgwrc
+
+
+Customisation
+-------------
+
+See /etc/pkuipgwrc for an example.
+
+
+Authors
+-------
+
+Copyright (c) 2007-2009,2011-2012 Chen Xing <cxcxcxcx@gmail.com>
+Copyright (c) 2014-2015 Casper Ti. Vector <caspervector@gmail.com>
+Copyright (c) 2015 Jianguo Chen <cjgls@pku.edu.cn>
+
+<http://www.linux-wiki.cn/>
+
