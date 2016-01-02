@@ -1,3 +1,5 @@
+# Sections for other ipgw programs can also exist.
+
 [pkuipgw]
 
 username = 1234567890

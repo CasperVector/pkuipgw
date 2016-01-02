@@ -16,14 +16,14 @@ If no config file is specified with `-c', pkuipgw will try to read the
 following files in order, and newer configurations will be overlaid on old
 ones:
 
-	/etc/pkuipgwrc
-	$HOME/.pkuipgwrc
+	/etc/ipgwrc
+	$HOME/.ipgwrc
 
 
 Customisation
 -------------
 
-See /etc/pkuipgwrc for an example.
+See ipgwrc for an example.
 
 
 Authors

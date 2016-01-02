@@ -257,7 +257,7 @@ def in_main(argv):
         if configFiles:
             raise IpgwException('ArgError')
     elif not configFiles:
-        configFiles = ['/etc/pkuipgwrc', expanduser('~/.pkuipgwrc')]
+        configFiles = ['/etc/ipgwrc', expanduser('~/.ipgwrc')]
 
     if len(args) < 1 or args[0] not in ['connect', 'disconnect', 'kick']:
         raise IpgwException('ArgError')

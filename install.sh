@@ -6,8 +6,8 @@
 # Copyright (c) 2014-2015 Casper Ti. Vector <caspervector@gmail.com>
 
 install -m 755 pkuipgw /usr/bin/pkuipgw
-if [[ ! -f /etc/pkuipgwrc ]]; then
-	install -m 600 pkuipgwrc /etc/pkuipgwrc
+if [[ ! -f /etc/ipgwrc ]]; then
+	install -m 600 ipgwrc /etc/ipgwrc
 fi
 
 echo "TIPS: Go to http://www.linux-wiki.cn/ to" \
