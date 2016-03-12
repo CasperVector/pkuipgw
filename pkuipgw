@@ -96,31 +96,17 @@ def login(opener, username, password):
         }).encode('UTF-8')
     )
     html = read_page(page)
-    if re.match(r'https://its\.pku\.edu\.cn/netportal/', page.geturl()):
-        return bool(re.search(r"doaction\('PKUIPGW\?", html)) + 1
-    else:
+    if not re.match(r'https://its\.pku\.edu\.cn/netportal/', page.geturl()):
         if html.find('Username or Password error!') != -1:
             raise IpgwException('IpgwError', 'username or password error')
         else:
             raise IpgwException('IpgwError', 'failed to open netportal page')
 
-def do_connect(opener, typ, variant = 1):
-    if variant == 1:
-        url = 'https://its.pku.edu.cn/netportal/%s%s' % (
-            'ipgwopen' if typ.startswith('connect') else 'ipgwclose',
-            'all' if typ.endswith('all') else ''
-        )
-    else:
-        opener.open(
-            'https://its.pku.edu.cn/netportal/PKUIPGW?cmd=%s&type=%s&fr=0' % {
-                'connect': ('open', 'free'),
-                'connectall': ('open', 'fee'),
-                'disconnect': ('close', 'self'),
-                'disconnectall': ('close', 'allconn')
-            }[typ]
-        )
-        url = 'https://its.pku.edu.cn/netportal/itsResult.jsp'
-    return read_page(opener.open(url))
+def do_connect(opener, action):
+    return read_page(opener.open('https://its.pku.edu.cn/netportal/%s%s' % (
+        'ipgwopen' if action.startswith('connect') else 'ipgwclose',
+        'all' if action.endswith('all') else ''
+    )))
 
 def do_kick(opener, cred, ip):
     cred['operation'] = 'disconnectip_err'
@@ -164,50 +150,12 @@ def get_conn(opener, cred):
     conn[0] = [col.group(1) for col in conn[0]]
     return conn
 
-def get_acct_info(html, variant = 1):
-    result = [('VARIANT', str(variant))]
-
-    if variant == 1:
-        match = re.search(r'<!--IPGWCLIENT_START(.*?)IPGWCLIENT_END-->', html)
-        if not match:
-            raise IpgwException('IpgwError', 'failed to retrieve account info')
-        result += re.findall(r'([^ =]+)=([^ ]*)', match.group(1))
-        status = dict(result).get('SUCCESS') == 'YES'
-
-    else:
-        dic = {}
-        for div in re.findall(
-            r'<div id="title.*?</div>', html, flags = re.DOTALL
-        ):
-            for k, pat in [
-                ('INTERNET', r'\b(Internet|Network)\b'),
-                ('WLAN', r'\b(WLAN|Wireless)\b')
-            ]:
-                if re.search(pat, div):
-                    dic[k] = re.search(
-                        r'\b(Connected|Disconnected|closed)\b', div
-                    )
-        if not ('WLAN' in dic and 'INTERNET' in dic):
-            raise IpgwException('IpgwError', 'failed to retrieve account info')
-        match = re.search(
-            r'<center><table.*?</table></center>', html, flags = re.DOTALL
-        )
-
-        result += [
-            (k, v.group(1).capitalize() if v else 'Failed')
-            for k, v in sorted(dic.items())
-        ] + [
-            (k.replace('&nbsp;', '').rstrip('\uFF1A'), v)
-            for k, v in re.findall(
-                r'<tr>\s*<td[^<>]*>([^<>]+)</td>\s*'
-                r'<td[^<>]*>\s*<strong>([^<>]*)</strong>\s*</td>\s*</tr>',
-                re.sub(
-                    r'<!--.*?-->', '', match.group(0) if match else '',
-                    flags = re.DOTALL
-                )
-            )
-        ]
-        status = all(dic.values())
+def get_acct_info(html):
+    match = re.search(r'<!--IPGWCLIENT_START(.*?)IPGWCLIENT_END-->', html)
+    if not match:
+        raise IpgwException('IpgwError', 'failed to retrieve account info')
+    result = re.findall(r'([^ =]+)=([^ ]*)', match.group(1))
+    status = dict(result).get('SUCCESS') == 'YES'
 
     return (status,
         ''.join([table([16], [item[0] + ':', item[1]]) for item in result])
@@ -272,7 +220,7 @@ def in_main(argv):
 
     username, password = get_login_cred(configFiles)
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
-    variant = login(opener, username, password)
+    login(opener, username, password)
     if args[0] == 'kick':
         cred = get_kick_cred(do_connect(opener, 'connect'))
         info = get_acct_info(do_kick(
@@ -280,8 +228,8 @@ def in_main(argv):
         ))
     else:
         info = get_acct_info(do_connect(
-            opener, args[0] + ('all' if doAll else ''), variant
-        ), variant)
+            opener, args[0] + ('all' if doAll else '')
+        ))
     if not info[0]:
         raise IpgwException(
             'IpgwError', 'account info indicating failure', info[1]
