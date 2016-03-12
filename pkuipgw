@@ -3,7 +3,7 @@
 # pkuipgw: PKU IPGW Client for Linux (v0.5.4)
 # <https://www.linux-wiki.cn/>
 # Copyright (c) 2007-2009,2011-2012 Chen Xing <cxcxcxcx@gmail.com>
-# Copyright (c) 2014-2015 Casper Ti. Vector <caspervector@gmail.com>
+# Copyright (c) 2014-2016 Casper Ti. Vector <caspervector@gmail.com>
 # Copyright (c) 2015 Jianguo Chen <cjgls@pku.edu.cn>
 
 from __future__ import unicode_literals
@@ -242,7 +242,7 @@ def ask_kick_ip(conn):
 
 def in_main(argv):
     try:
-        opts, args = getopt.getopt(argv[1:], 'c:i')
+        opts, args = getopt.getopt(argv, 'c:i')
     except getopt.GetoptError:
         raise IpgwException('ArgError')
 
@@ -290,7 +290,7 @@ def in_main(argv):
 
 def main():
     try:
-        in_main(sys.argv)
+        in_main(sys.argv[1 :])
     except IpgwException as ex:
         info = {
             'ArgError': [1,
