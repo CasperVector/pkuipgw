@@ -109,18 +109,19 @@ def do_connect(opener, action):
     )))
 
 def do_kick(opener, cred, ip):
-    cred['operation'] = 'disconnectip_err'
-    cred['disconnectip'] = ip
     return read_page(opener.open(
         'https://its.pku.edu.cn/netportal/ipgw.ipgw',
-        urlencode(cred).encode('UTF-8')
+        urlencode(dict(cred + [
+            ('operation', 'disconnectip_err'), ('disconnectip', ip)
+        ])).encode('UTF-8')
     ))
 
 def get_conn(opener, cred):
-    cred['operation'] = 'get_disconnectip_err'
     html = read_page(opener.open(
         'https://its.pku.edu.cn/netportal/ipgw.ipgw',
-        urlencode(cred).encode('UTF-8')
+        urlencode(dict(cred + [
+            ('operation', 'get_disconnectip_err')
+        ])).encode('UTF-8')
     ))
     match = re.search(
         r'<table[^<>]+align=center>.*?</table>', html, flags = re.DOTALL
@@ -167,10 +168,10 @@ def get_kick_cred(html):
     )
     if not match:
         raise IpgwException('IpgwError', 'failed to retrieve kick credentials')
-    return dict(re.findall(
+    return re.findall(
         r'<input type="hidden" name="([^"]+)" value="([^"]*)">',
         match.group(0)
-    ))
+    )
 
 def ask_kick_ip(conn):
     l = len(conn)
