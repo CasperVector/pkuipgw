@@ -82,16 +82,16 @@ def my_open(opener, d):
         txt = txt.decode('GB18030')
 
     try:
-        d = json.loads(txt)
-        assert type(d) == dict and all(
-            type(k) == type(v) == type('') for k, v in d.items()
+        ret = json.loads(txt)
+        assert type(ret) == dict and all(
+            type(k) == type(v) == type('') for k, v in ret.items()
         )
     except:
         sys.stderr.write(txt + '\n' if txt and not txt.endswith('\n') else txt)
         raise IpgwException(
             'IpgwError', "malformed response for command `%s'" % d['cmd']
         )
-    return d
+    return ret
 
 def get_cred(configFiles):
     if configFiles:
