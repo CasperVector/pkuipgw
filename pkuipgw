@@ -9,6 +9,7 @@
 from __future__ import unicode_literals
 
 import getopt
+import json
 import re
 import sys
 import traceback
@@ -35,19 +36,26 @@ def uni(s):
     else:
         return s.decode('UTF-8')
 
-def pad(width, s):
-    delta = width - (len(s) + len([c for c in s if ord(c) > 128]))
-    return s + ' ' * (delta if delta > 0 else 0)
+def width(s):
+    return len(s) + len([c for c in s if ord(c) > 128])
 
-def table(ws, ss):
-    return ''.join([pad(w, s) for w, s in zip(ws + [0], ss)]) + '\n'
+def pad(ws, r):
+    ret, sep = [], False
+    for w, s in reversed(list(zip(ws, r))):
+        if sep:
+            s += ' ' * (w - width(s) + 2)
+        if s:
+            sep = True
+        ret.append(s)
+    return ''.join(reversed(ret))
 
-def read_page(p):
-    p = p.read()
-    try:
-        return p.decode('UTF-8')
-    except UnicodeDecodeError:
-        return p.decode('GB18030')
+def table(rs):
+    rs = list(rs)
+    ws = [max(width(s) for s in field) for field in zip(*rs)]
+    return ''.join(pad(ws, record) + '\n' for record in rs)
+
+def fmt_dict(d):
+    return table([k + ':', v] for k, v in sorted(d.items()))
 
 def my_input(prompt, pw = False):
     try:
@@ -64,7 +72,28 @@ def my_input(prompt, pw = False):
         raise IpgwException('ValueError')
     return uni(s.rstrip('\r\n'))
 
-def get_login_cred(configFiles):
+def my_open(opener, d):
+    txt = opener.open(
+        'https://its.pku.edu.cn/cas/ITSClient', urlencode(d).encode('UTF-8')
+    ).read()
+    try:
+        txt = txt.decode('UTF-8')
+    except UnicodeDecodeError:
+        txt = txt.decode('GB18030')
+
+    try:
+        d = json.loads(txt)
+        assert type(d) == dict and all(
+            type(k) == type(v) == type('') for k, v in d.items()
+        )
+    except:
+        sys.stderr.write(txt + '\n' if txt and not txt.endswith('\n') else txt)
+        raise IpgwException(
+            'IpgwError', "malformed response for command `%s'" % d['cmd']
+        )
+    return d
+
+def get_cred(configFiles):
     if configFiles:
         config = ConfigParser()
         if not config.read(configFiles):
@@ -82,170 +111,45 @@ def get_login_cred(configFiles):
     else:
         username = my_input('Username: ')
         password = my_input('Password: ', pw = True)
-    return username, password
+    return [('username', username), ('password', password)]
 
-def login(opener, username, password):
-    magicStr = '|;kiDrqvfi7d$v0p5Fg72Vwbv2;|'
-    # This enables wireless users with an account but no balance to access the
-    # PKU subnets.
-    opener.open('https://its.pku.edu.cn/').read()
-    page = opener.open(
-        'https://its.pku.edu.cn/cas/login', urlencode({
-            'fwrd': 'free',
-            'username1': username,
-            'password': password,
-            'username': username + magicStr + password + magicStr + '12',
-        }).encode('UTF-8')
-    )
-    html = read_page(page)
-    if re.match(r'https://its\.pku\.edu\.cn/netportal/', page.geturl()):
-        # If login() returns 2, but the user do_connect() with variant = 1, he
-        # would see no indication of failure from the returned webpage, but
-        # would be actually unable to access the PKU subnets except for
-        # `www.pku.edu.cn' and ITS.
-        return bool(re.search(r"doaction\('PKUIPGW\?", html)) + 1
-    else:
-        if html.find('Username or Password error!') != -1:
-            raise IpgwException('IpgwError', 'username or password error')
-        else:
-            raise IpgwException('IpgwError', 'failed to open netportal page')
+def do_kick(opener, cred):
+    d = my_open(opener, dict(cred + [('cmd', 'getconnections')]))
+    try:
+        if list(d.keys()) != ['succ']:
+            raise ValueError
+        l = d['succ']
+        if not l:
+            raise IpgwException('IpgwError', 'no connection to kick')
+        l = l.split(';')
+        if len(l) % 4:
+            raise ValueError
+    except ValueError:
+        sys.stderr.write(fmt_dict(d))
+        raise IpgwException('IpgwError', 'invalid connection dict')
+    l = [l[i : i + 4] for i in range(0, len(l), 4)]
 
-def do_connect(opener, typ, variant = 1):
-    if variant == 1:
-        url = 'https://its.pku.edu.cn/netportal/%s%s' % (
-            'ipgwopen' if typ.startswith('connect') else 'ipgwclose',
-            'all' if typ.endswith('all') else ''
-        )
-    else:
-        opener.open(
-            'https://its.pku.edu.cn/netportal/PKUIPGW?cmd=%s&type=%s&fr=0' % {
-                'connect': ('open', 'free'),
-                'connectall': ('open', 'fee'),
-                'disconnect': ('close', 'self'),
-                'disconnectall': ('close', 'allconn')
-            }[typ]
-        )
-        url = 'https://its.pku.edu.cn/netportal/itsResult.jsp'
-    return read_page(opener.open(url))
-
-def do_kick(opener, cred, ip):
-    return read_page(opener.open(
-        'https://its.pku.edu.cn/netportal/ipgw.ipgw',
-        urlencode(dict(cred + [
-            ('operation', 'disconnectip_err'), ('disconnectip', ip)
-        ])).encode('UTF-8')
-    ))
-
-def get_conn(opener, cred):
-    html = read_page(opener.open(
-        'https://its.pku.edu.cn/netportal/ipgw.ipgw',
-        urlencode(dict(cred + [
-            ('operation', 'get_disconnectip_err')
-        ])).encode('UTF-8')
-    ))
-    match = re.search(
-        r'<table[^<>]+align=center>.*?</table>', html, flags = re.DOTALL
-    )
-    if not match:
-        raise IpgwException(
-            'IpgwError', 'failed to retrieve list of connections'
-        )
-
-    html = match.group(0)
-    conn = [
-        re.findall(r'<td[^<>]*>(.*?)</td>', row) for row in
-        re.findall(r'<tr align=center>(.*?)</tr>', html, flags = re.DOTALL)
-    ]
-    if len(conn) < 2:
-        raise IpgwException(
-            'IpgwError', 'malformed list of connections', html + '\n'
-        )
-
-    conn[0] = [re.match(r'<b>(.*)</b>$', col) for col in conn[0]]
-    if not (all(conn[0]) and list(set(map(len, conn))) == [4]):
-        raise IpgwException(
-            'IpgwError', 'malformed list of connections', html + '\n'
-        )
-
-    conn = [row[: 3] for row in conn]
-    conn[0] = [col.group(1) for col in conn[0]]
-    return conn
-
-def get_acct_info(html, variant = 1):
-    result = [('VARIANT', str(variant))]
-
-    if variant == 1:
-        match = re.search(r'<!--IPGWCLIENT_START(.*?)IPGWCLIENT_END-->', html)
-        if not match:
-            raise IpgwException('IpgwError', 'failed to retrieve account info')
-        result += re.findall(r'([^ =]+)=([^ ]*)', match.group(1))
-        status = dict(result).get('SUCCESS') == 'YES'
-
-    else:
-        dic = {}
-        for div in re.findall(
-            r'<div id="title.*?</div>', html, flags = re.DOTALL
-        ):
-            for k, pat in [
-                ('INTERNET', r'\b(Internet|Network)\b'),
-                ('WLAN', r'\b(WLAN|Wireless)\b')
-            ]:
-                if re.search(pat, div):
-                    dic[k] = re.search(
-                        r'\b(Connected|Disconnected|closed)\b', div
-                    )
-        if not ('WLAN' in dic and 'INTERNET' in dic):
-            raise IpgwException('IpgwError', 'failed to retrieve account info')
-        match = re.search(
-            r'<center><table.*?</table></center>', html, flags = re.DOTALL
-        )
-
-        result += [
-            (k, v.group(1).capitalize() if v else 'Failed')
-            for k, v in sorted(dic.items())
-        ] + [
-            (k.replace('&nbsp;', '').rstrip('\uFF1A'), v)
-            for k, v in re.findall(
-                r'<tr>\s*<td[^<>]*>([^<>]+)</td>\s*'
-                r'<td[^<>]*>\s*<strong>([^<>]*)</strong>\s*</td>\s*</tr>',
-                re.sub(
-                    r'<!--.*?-->', '', match.group(0) if match else '',
-                    flags = re.DOTALL
-                )
-            )
-        ]
-        status = all(dic.values())
-
-    return (status,
-        ''.join([table([16], [item[0] + ':', item[1]]) for item in result])
-    )
-
-def get_kick_cred(html):
-    match = re.search(
-        r'<form name="disconnect".*?</form>', html, flags = re.DOTALL
-    )
-    if not match:
-        raise IpgwException('IpgwError', 'failed to retrieve kick credentials')
-    return re.findall(
-        r'<input type="hidden" name="([^"]+)" value="([^"]*)">',
-        match.group(0)
-    )
-
-def ask_kick_ip(conn):
-    l = len(conn)
+    n = len(l)
     sys.stderr.write('List of connections:\n')
-    for i in range(l):
-        sys.stderr.write(table(
-            [8, 24, 16], ['(%d)' % i if i else ''] + conn[i]
-        ))
-    i = my_input('Choose a connection to kick (1 - %d): ' % (l - 1))
+    sys.stderr.write(table(['(%d)' % i] + r for i, r in enumerate(l)))
+    i = my_input('Choose a connection to kick (0 - %d): ' % (n - 1))
     try:
         i = int(i)
-        if not (0 < i < l):
+        if not (0 <= i < n):
             raise ValueError
     except ValueError:
         raise IpgwException('ValueError')
-    return conn[i][0]
+
+    return my_open(opener, dict(cred + [
+        ('cmd', 'disconnect'), ('ip', l[i][0])
+    ]))
+
+def do_connect(opener, cred, typ, doAll):
+    return my_open(opener, dict(
+        cred + [('cmd', 'open'), ('iprange', 'fee' if doAll else 'free')]
+        if typ == 'connect' else
+        cred + [('cmd', 'closeall')] if doAll else [('cmd', 'close')]
+    ))
 
 def in_main(argv):
     try:
@@ -277,23 +181,14 @@ def in_main(argv):
     else:
         raise IpgwException('ArgError')
 
-    username, password = get_login_cred(configFiles)
+    cred = get_cred(configFiles)
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
-    variant = login(opener, username, password)
-    if args[0] == 'kick':
-        cred = get_kick_cred(do_connect(opener, 'connect'))
-        info = get_acct_info(do_kick(
-            opener, cred, ask_kick_ip(get_conn(opener, cred))
-        ))
-    else:
-        info = get_acct_info(do_connect(
-            opener, args[0] + ('all' if doAll else ''), variant
-        ), variant)
-    if not info[0]:
-        raise IpgwException(
-            'IpgwError', 'account info indicating failure', info[1]
-        )
-    sys.stdout.write(info[1])
+    opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
+    d = do_kick(opener, cred) if args[0] == 'kick' else \
+        do_connect(opener, cred, args[0], doAll)
+    sys.stdout.write(fmt_dict(d))
+    if 'error' in d:
+        raise IpgwException('IpgwError', 'response indicating failure')
 
 def main():
     try:
@@ -309,10 +204,7 @@ def main():
             'ConfError': [1], 'IpgwError': [2]
         }[ex.args[0]]
         if len(info) == 1:
-            info.append({
-                2: '%s: %s\n',
-                3: '%s: %s (see below)\n\n%s'
-            }[len(ex.args)] % ex.args)
+            info.append('%s: %s\n' % ex.args)
         sys.stderr.write(info[1])
         sys.exit(info[0])
     except:
