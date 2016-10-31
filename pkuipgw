@@ -124,7 +124,7 @@ def do_kick(opener, cred):
             raise ValueError
     except ValueError:
         sys.stderr.write(fmt_dict(d))
-        raise IpgwException('IpgwError', 'invalid connection dict')
+        raise IpgwException('IpgwError', 'invalid connection info')
     l = [l[i : i + 4] for i in range(0, len(l), 4)]
 
     n = len(l)
