@@ -50,12 +50,11 @@ def pad(ws, r):
     return ''.join(reversed(ret))
 
 def table(rs):
-    rs = list(rs)
     ws = [max(width(s) for s in field) for field in zip(*rs)]
     return ''.join(pad(ws, record) + '\n' for record in rs)
 
 def fmt_dict(d):
-    return table([k + ':', v] for k, v in sorted(d.items()))
+    return table([[k + ':', v] for k, v in sorted(d.items())])
 
 def my_input(prompt, pw = False):
     try:
@@ -101,7 +100,7 @@ def get_cred(configFiles):
             raise IpgwException(
                 'ConfError', "section `pkuipgw' not found in config file"
             )
-        config = dict([(uni(k), uni(v)) for (k, v) in config.items('pkuipgw')])
+        config = dict((uni(k), uni(v)) for (k, v) in config.items('pkuipgw'))
         if 'username' not in config or 'password' not in config:
             raise IpgwException(
                 'ConfError', "both `username' and `password' required"
@@ -130,7 +129,7 @@ def do_kick(opener, cred):
 
     n = len(l)
     sys.stderr.write('List of connections:\n')
-    sys.stderr.write(table(['(%d)' % i] + r for i, r in enumerate(l)))
+    sys.stderr.write(table([['(%d)' % i] + r for i, r in enumerate(l)]))
     i = my_input('Choose a connection to kick (0 - %d): ' % (n - 1))
     try:
         i = int(i)
