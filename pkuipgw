@@ -83,9 +83,8 @@ def my_open(opener, d):
 
     try:
         ret = json.loads(txt)
-        assert type(ret) == dict and all(
-            type(k) == type(v) == type('') for k, v in ret.items()
-        )
+        assert type(ret) == dict and \
+            all(type(k) == type(v) == type('') for k, v in ret.items())
     except:
         sys.stderr.write(txt + '\n' if txt and not txt.endswith('\n') else txt)
         raise IpgwException(
