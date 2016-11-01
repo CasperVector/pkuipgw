@@ -100,7 +100,7 @@ def get_cred(configFiles):
             raise IpgwException(
                 'ConfError', "section `pkuipgw' not found in config file"
             )
-        config = dict((uni(k), uni(v)) for (k, v) in config.items('pkuipgw'))
+        config = dict((uni(k), uni(v)) for k, v in config.items('pkuipgw'))
         if 'username' not in config or 'password' not in config:
             raise IpgwException(
                 'ConfError', "both `username' and `password' required"
