@@ -190,7 +190,7 @@ def in_main(argv):
 
 def main():
     try:
-        in_main(sys.argv[1 :])
+        in_main(sys.argv[1:])
     except IpgwException as ex:
         info = {
             'ArgError': [1,
