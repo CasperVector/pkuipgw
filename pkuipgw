@@ -39,9 +39,9 @@ def uni(s):
 def width(s):
     return len(s) + len([c for c in s if ord(c) > 128])
 
-def pad(ws, r):
+def pad(ws, record):
     ret, sep = [], False
-    for w, s in reversed(list(zip(ws, r))):
+    for w, s in reversed(list(zip(ws, record))):
         if sep:
             s += ' ' * (w - width(s) + 2)
         if s:
@@ -142,10 +142,10 @@ def do_kick(opener, cred):
         ('cmd', 'disconnect'), ('ip', l[i][0])
     ]))
 
-def do_connect(opener, cred, typ, doAll):
+def do_connect(opener, cred, cmd, doAll):
     return my_open(opener, dict(
         cred + [('cmd', 'open'), ('iprange', 'fee' if doAll else 'free')]
-        if typ == 'connect' else
+        if cmd == 'connect' else
         cred + [('cmd', 'closeall')] if doAll else [('cmd', 'close')]
     ))
 
