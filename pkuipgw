@@ -18,14 +18,12 @@ from os.path import expanduser
 
 if sys.version_info[0] < 3:
     from ConfigParser import ConfigParser
-    from cookielib import CookieJar
     from urllib import urlencode
-    from urllib2 import build_opener, HTTPCookieProcessor
+    from urllib2 import build_opener
 else:
     from configparser import ConfigParser
-    from http.cookiejar import CookieJar
     from urllib.parse import urlencode
-    from urllib.request import build_opener, HTTPCookieProcessor
+    from urllib.request import build_opener
 
 class IpgwException(Exception):
     pass
@@ -180,7 +178,7 @@ def in_main(argv):
         raise IpgwException('ArgError')
 
     cred = get_cred(configFiles)
-    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    opener = build_opener()
     opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
     d = do_kick(opener, cred) if args[0] == 'kick' else \
         do_connect(opener, cred, args[0], doAll)
