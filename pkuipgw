@@ -179,7 +179,7 @@ def in_main(argv):
 
     cred = get_cred(configFiles)
     opener = build_opener()
-    opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
+    opener.addheaders = [('User-Agent', '.')]
     d = do_kick(opener, cred) if args[0] == 'kick' else \
         do_connect(opener, cred, args[0], doAll)
     sys.stdout.write(fmt_dict(d))
